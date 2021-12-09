@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "dlq-redeem"
+version = "0.0.0"
+description = "AWS SQS dead letter queue (DLQ) message inspection and cleanup automation tool"
+authors = ["Epsy <engineering@epsyhealth.com>"]
+keywords = []
+readme = "README.md"
+include = ["README.md"]
+homepage = "https://github.com/epsyhealth/dlq-redeem"
+repository = "https://github.com/epsyhealth/dlq-redeem"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+click = "^8.0.3"
+click-log = "^0.3.2"
+boto3 = "^1.20.22"
+
+[tool.poetry.dev-dependencies]
+black = "^21.12b0"
+isort = "^5.10.1"
+flake8 = "^4.0.1"
+bump2version = "^1.0.1"
+
+[tool.poetry.scripts]
+redeem = "dlq_redeem.cli:cli"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+line_length = 120
