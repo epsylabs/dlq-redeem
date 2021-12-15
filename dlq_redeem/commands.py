@@ -118,7 +118,7 @@ def sqs(
                             "Original target function or queue could not be identified. "
                             "Please enter target function or queue ARN",
                             default=target_arn or "",
-                            type=click.STRING
+                            type=click.STRING,
                         )
                     task.target = target_arn
 
