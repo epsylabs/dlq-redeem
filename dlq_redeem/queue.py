@@ -51,7 +51,7 @@ def read_messages(client, queue_url: str, long_poll_duration: Optional[int] = No
 
             yield message
 
-    logger.info(click.style("\nNo more visible messages in queue.", fg="magenta"))
+    logger.info(click.style("\nNo more visible messages in queue.", fg="magenta", bold=True))
 
 
 def backup_message(backup_dir: str, message: dict):
