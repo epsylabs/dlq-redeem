@@ -39,7 +39,12 @@ def ask_for_action(task: Task, message_body: dict, message_attributes: dict) -> 
 @click.command()
 @click.argument("dlq_name")
 @click.option("--backup-dir", default="", help="Path to backup directory, the default is the working directory.")
-@click.option("--dry-run", is_flag=True, help="Do not actually re-process or delete messages from the queue.")
+@click.option(
+    "--dry-run/--no-dry-run",
+    is_flag=True,
+    default=True,
+    help="Do not actually re-process or delete messages from the queue.",
+)
 @click.option("--long-poll", default=0, type=int, help="Keep running and polling the queue for X seconds.")
 @click.option(
     "--queue-name", help="Name of the SQS queue whose DLQ is processed. Messages are sent here when reprocessing."
