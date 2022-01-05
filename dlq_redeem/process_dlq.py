@@ -104,7 +104,7 @@ class Inspectors:
 
 def invoke(client, message_id: str, function_arn: str, payload: dict, dry_run: bool = False) -> bool:
     logger.info(
-        click.style("Invoking lambda", fg="magenta")
+        click.style(f'Invoking lambda "{function_arn.split(":")[-1]}"', fg="magenta")
         + (click.style(" dry-run", fg="yellow") if dry_run else "")
         + click.style(" for message ", fg="magenta")
         + click.style(message_id, fg="cyan", bold=True)
