@@ -2,7 +2,7 @@ import json
 from base64 import b64decode
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Dict, Optional, Tuple
+from typing import NamedTuple, Optional
 
 import click
 
@@ -17,116 +17,89 @@ class Action(Enum):
     IGNORE = auto()
 
 
-recurring_actions: Dict[Tuple[Optional[str], Optional[str], Optional[str]], Action] = {}
+class EventCategory(NamedTuple):
+    source: Optional[str] = None
+    type: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
 class Task:
-    action: Action
+    category: EventCategory = EventCategory()
     payload: Optional[dict] = None
     target: Optional[str] = None
 
     @classmethod
-    def from_request_context(cls, action: Action, message_body: dict, message_attributes: dict) -> "Task":
-        if function_arn := message_attributes.get("TARGET_ARN"):
-            return cls(action, message_body, function_arn)
-
+    def from_request_context(cls, message_body: dict, message_attributes: dict) -> "Task":
+        category, payload, target = EventCategory(), None, None
         try:
-            return cls(action, message_body["requestPayload"], message_body["requestContext"]["functionArn"])
-        except KeyError as error:
-            logger.error(f"Unexpected message body structure: {error} not found.")
-            return cls(Action.PASS)
+            if "EventBusName" in message_body and "Detail" in message_body:
+                category = EventCategory(message_body.get("Source"), message_body.get("DetailType"))
+                payload = json.loads(message_body["Detail"])
+            elif "requestContext" in message_body and "DDBStreamBatchInfo" in message_body:
+                payload = {"DDBStreamBatchInfo": message_body["DDBStreamBatchInfo"]}
+                target = message_body["requestContext"].get("functionArn")
+                category = EventCategory(
+                    "DynamodbStream", "DDBStreamBatchInfo", message_body["requestContext"].get("condition")
+                )
+            elif "requestPayload" in message_body:
+                payload = message_body["requestPayload"]
+                target = message_body.get("requestContext", {}).get("functionArn")
+                category = EventCategory(
+                    payload.get("source"),
+                    payload.get("detail-type"),
+                    message_body.get("responsePayload", {}).get("errorType"),
+                )
+            else:
+                payload = message_body
+                target = message_attributes.get("TARGET_ARN")
+                category = EventCategory(
+                    payload.get("source"), payload.get("detail-type"), message_attributes.get("ERROR_CODE")
+                )
+        except json.JSONDecodeError as error:
+            logger.warning("Invalid JSON: " + str(error))
+
+        return cls(category, payload, target)
+
+    def __bool__(self) -> bool:
+        """Returns False if initialised without any arguments, if anything is not None then it returns True."""
+        return not all((all(attr is None for attr in self.category), self.payload is None, self.target is None))
 
 
-def check_for_validation_error(message_body: dict, message_attributes: dict) -> Task:
-    if message_body.get("responsePayload", {}).get("errorType") == "ValidationError":
-        return Task.from_request_context(Action.REPROCESS, message_body, message_attributes)
-    else:
-        return Task(Action.PASS)
+class Inspectors:
+    @staticmethod
+    def reprocess_validation_errors(task: Task, *_) -> Action:
+        return Action.REPROCESS if task.category.error == "ValidationError" else Action.PASS
 
+    @staticmethod
+    def reprocess_timeouts(task: Task, message_body: dict, *_) -> Action:
+        response_payload = message_body.get("responsePayload") or {}
+        if not task.category.error and "Task timed out" in response_payload.get("errorMessage", ""):
+            return Action.REPROCESS
+        else:
+            return Action.PASS
 
-def check_for_timeout(message_body: dict, message_attributes: dict) -> Task:
-    response_payload = message_body.get("responsePayload") or {}
-    if not response_payload.get("errorType") and "Task timed out" in response_payload.get("errorMessage", ""):
-        return Task.from_request_context(Action.REPROCESS, message_body, message_attributes)
-    else:
-        return Task(Action.PASS)
+    @staticmethod
+    def ignore_in_progress(task: Task, *_) -> Action:
+        if task.category.error in ("IdempotencyAlreadyInProgressError", "IDEMPOTENCY_ALREADY_IN_PROGRESS_ERROR"):
+            return Action.IGNORE
+        else:
+            return Action.PASS
 
+    @staticmethod
+    def reprocess_event_age_exceeded(_, message_body: dict, *__) -> Action:
+        if message_body.get("requestContext", {}).get("condition") == "EventAgeExceeded":
+            return Action.REPROCESS
+        else:
+            return Action.PASS
 
-def check_for_in_progress(message_body: dict, message_attributes: dict) -> Task:
-    if (
-        message_body.get("responsePayload", {}).get("errorType") == "IdempotencyAlreadyInProgressError"
-        or message_attributes.get("ERROR_CODE") == "IDEMPOTENCY_ALREADY_IN_PROGRESS_ERROR"
-    ):
-        return Task(Action.IGNORE)
-    else:
-        return Task(Action.PASS)
+    @staticmethod
+    def reprocess_all_unhandled_errors(task: Task, *_) -> Action:
+        return Action.REPROCESS if not task.category.error or task.category.error == "Unhandled" else Action.PASS
 
-
-def check_for_event_age_exceeded(message_body: dict, message_attributes: dict) -> Task:
-    if message_body.get("requestContext", {}).get("condition") == "EventAgeExceeded":
-        return Task.from_request_context(Action.REPROCESS, message_body, message_attributes)
-    else:
-        return Task(Action.PASS)
-
-
-def check_for_any_unhandled_error(message_body: dict, message_attributes: dict) -> Task:
-    if message_body.get("responseContext", {}).get("functionError") == "Unhandled":
-        return Task.from_request_context(Action.REPROCESS, message_body, message_attributes)
-    else:
-        return Task(Action.PASS)
-
-
-def ask_for_action(message_body: dict, message_attributes: dict) -> Task:
-    payload = message_body.get("requestPayload") or message_body
-    source = payload.get("source")
-    event_type = payload.get("detail-type")
-    error_type = (
-        message_attributes["ERROR_CODE"]
-        if "ERROR_CODE" in message_attributes
-        else message_body.get("responsePayload", {}).get("errorType")
-    )
-    choice_key = (source, event_type, error_type)
-
-    if choice_key in recurring_actions:
-        return Task.from_request_context(recurring_actions[choice_key], message_body, message_attributes)
-
-    logger.info(click.style("Message body:", fg="blue"))
-    logger.info(json.dumps(message_body, indent=2) + "\n")
-    logger.info(click.style("Message attributes:", fg="blue"))
-    logger.info(json.dumps(message_attributes, indent=2) + "\n")
-
-    bool_params = dict(type=click.types.BoolParamType(), default=False, show_default=False, show_choices=False)
-
-    action = Action.PASS
-    if click.prompt("Do you want to attempt to re-process this? [y/N]", **bool_params):
-        action = Action.REPROCESS
-    elif click.prompt("Do you want to ignore this and delete the message from the DLQ? [y/N]", **bool_params):
-        action = Action.IGNORE
-
-    def _format(value: Optional[str]) -> str:
-        return click.style("unknown", fg="yellow") if value is None else click.style(value, fg="cyan")
-
-    if click.prompt(
-        f"Do you want to do the same with all {_format(source)} messages of type {_format(event_type)} "
-        f"that failed with {_format(error_type)} error? [y/N]",
-        **bool_params,
-    ):
-        recurring_actions[choice_key] = action
-
-    return (
-        Task.from_request_context(action, message_body, message_attributes)
-        if action == Action.REPROCESS
-        else Task(action)
-    )
-
-
-inspectors = [
-    check_for_in_progress,
-]
-# TODO: Improve the inspectors so they stop catching all failures, or figure out how to integrate them with
-#       interactive mode. Now they don't allow fine tuned handling based on event type, they will cause all
-#       events to be retried (even if we don't want to retry some of them).
+    @staticmethod
+    def reprocess_all_device_registry_events(task: Task, *_) -> Action:
+        return Action.REPROCESS if task.category.source == "device-registry" else Action.PASS
 
 
 def invoke(client, message_id: str, function_arn: str, payload: dict, dry_run: bool = False) -> bool:
@@ -150,14 +123,26 @@ def invoke(client, message_id: str, function_arn: str, payload: dict, dry_run: b
         logger.debug(f"Response payload: {response_payload}")
 
         if response.get("FunctionError"):
-            raise Exception(f"({response['FunctionError']}) {response_payload.decode('utf-8')}")
+            error_details = response_payload.decode("utf-8")
+            try:
+                result = json.loads(response_payload)
+                error_details = (
+                    f'({result["errorType"]}) {result["errorMessage"]}\n'
+                    f'Stack trace:\n{"".join(result.get("stackTrace", []))}'
+                )
+            except json.JSONDecodeError as error:
+                logger.warning("JSON decode error: " + str(error))
+            except KeyError:
+                pass
+            finally:
+                raise Exception(f"({response['FunctionError']}) {error_details}")
         else:
             logger.info(click.style("Success", fg="green"))
 
         if "LogResult" in response:
             log_tail = b64decode(response["LogResult"]).decode("utf-8")
             report_index = log_tail.rfind("REPORT")
-            logger.info(log_tail[report_index:] if report_index >= 0 else log_tail)
+            logger.info(str(log_tail[report_index:] if report_index >= 0 else log_tail).strip("\n"))
 
         return True
     except Exception as error:
