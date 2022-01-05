@@ -10,7 +10,7 @@ homepage = "https://github.com/epsyhealth/dlq-redeem"
 repository = "https://github.com/epsyhealth/dlq-redeem"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.7"
 click = "^8.0.3"
 click-log = "^0.3.2"
 boto3 = "^1.20.22"
