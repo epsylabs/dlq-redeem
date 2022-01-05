@@ -139,7 +139,9 @@ def sqs(
                 success = requeue(
                     client=sqs_client,
                     message_id=message["MessageId"],
-                    queue_url=task.target if task.target.startswith("arn:aws:sqs:") else queue_url,
+                    queue_url=get_queue_url(sqs_client, task.target.split(":")[-1])
+                    if task.target.startswith("arn:aws:sqs:")
+                    else queue_url,
                     payload=task.payload,
                     # Message delivery is delayed to avoid quickly passing it back and forth between queue
                     # and DLQ in case it still fails to process.

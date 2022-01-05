@@ -30,6 +30,14 @@ class Task:
     target: Optional[str] = None
 
     @classmethod
+    def _get_error_message(cls, message_body: dict, message_attributes: dict):
+        return (
+            message_body.get("responsePayload", {}).get("errorMessage", "")
+            or message_attributes.get("ErrorMessage", "")
+            or message_attributes.get("ERROR_MESSAGE", "")
+        )
+
+    @classmethod
     def from_request_context(cls, message_body: dict, message_attributes: dict) -> "Task":
         category, payload, target = EventCategory(), None, None
         try:
@@ -58,6 +66,20 @@ class Task:
                 )
         except json.JSONDecodeError as error:
             logger.warning("Invalid JSON: " + str(error))
+
+        if not category.error:
+            message = cls._get_error_message(message_body, message_attributes)
+            if "Execution already in progress with idempotency key" in message:
+                error_type = "IdempotencyAlreadyInProgressError"
+            elif "Task timed out" in message:
+                error_type = "TaskTimedOut"
+            elif "Invocation failed to be made within the retry-able period" in message:
+                error_type = "InvocationFailed"
+            else:
+                error_type = None
+
+            if error_type:
+                category = EventCategory(category.source, category.type, error_type)
 
         return cls(category, payload, target)
 
