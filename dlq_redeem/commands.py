@@ -66,6 +66,9 @@ def sqs(
     interactive: bool = False,
     reprocess_all_unhandled: bool = False,
 ):
+    """
+    Process messages from DLQ.
+    """
     recurring_actions: Dict[EventCategory, Action] = {}
     target_arn: Optional[str] = None
 
