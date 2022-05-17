@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dlq-redeem"
-version = "0.0.0"
+version = "0.0.1"
 description = "AWS SQS dead letter queue (DLQ) message inspection and cleanup automation tool"
 authors = ["Epsy <engineering@epsyhealth.com>"]
 license = "MIT"
