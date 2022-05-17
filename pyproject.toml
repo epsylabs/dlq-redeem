@@ -3,11 +3,12 @@ name = "dlq-redeem"
 version = "0.0.0"
 description = "AWS SQS dead letter queue (DLQ) message inspection and cleanup automation tool"
 authors = ["Epsy <engineering@epsyhealth.com>"]
-keywords = []
+license = "MIT"
+keywords = ["library", "aws"]
 readme = "README.md"
 include = ["README.md"]
-homepage = "https://github.com/epsyhealth/dlq-redeem"
-repository = "https://github.com/epsyhealth/dlq-redeem"
+homepage = "https://github.com/epsylabs/dlq-redeem"
+repository = "https://github.com/epsylabs/dlq-redeem"
 
 [tool.poetry.dependencies]
 python = "^3.7"
