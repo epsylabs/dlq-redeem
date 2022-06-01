@@ -123,19 +123,32 @@ class Inspectors:
     def reprocess_all_device_registry_events(task: Task, *_) -> Action:
         return Action.REPROCESS if task.category.source == "device-registry" else Action.PASS
 
+    @staticmethod
+    def reprocess_all(*_, **__) -> Action:
+        return Action.REPROCESS
 
-def invoke(client, message_id: str, function_arn: str, payload: dict, dry_run: bool = False) -> bool:
+
+def invoke(
+    client, message_id: str, function_arn: str, payload: dict, dry_run: bool = False, async_invoke: bool = False
+) -> bool:
     logger.info(
         click.style(f'Invoking lambda "{function_arn.split(":")[-1]}"', fg="magenta")
         + (click.style(" dry-run", fg="yellow") if dry_run else "")
+        + (click.style(" asynchronously", fg="blue") if async_invoke else "")
         + click.style(" for message ", fg="magenta")
         + click.style(message_id, fg="cyan", bold=True)
     )
 
+    invocation_type = "RequestResponse"
+    if dry_run:
+        invocation_type = "DryRun"
+    elif async_invoke:
+        invocation_type = "Event"
+
     try:
         response = client.invoke(
             FunctionName=function_arn,
-            InvocationType="DryRun" if dry_run else "RequestResponse",
+            InvocationType=invocation_type,
             LogType="Tail",
             Payload=json.dumps(payload),
         )
@@ -158,6 +171,8 @@ def invoke(client, message_id: str, function_arn: str, payload: dict, dry_run: b
                 pass
             finally:
                 raise Exception(f"({response['FunctionError']}) {error_details}")
+        elif not 200 <= response.get("StatusCode", 0) < 300:
+            raise Exception(f'{response.get("StatusCode")} response from Lambda')
         else:
             logger.info(click.style("Success", fg="green"))
 
