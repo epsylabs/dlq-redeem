@@ -56,6 +56,11 @@ def ask_for_action(task: Task, message_body: dict, message_attributes: dict) -> 
     help="Re-process all failed lambda function invocations where the cause of the failure is unknown "
     "(an exception was returned that is not handled by any inspector defined in this tool).",
 )
+@click.option("--reprocess-all", is_flag=True, help="Re-process all messages")
+@click.option(
+    "--async", "async_invoke", is_flag=True, help="Invoke lambda functions asynchronously when re-processing a message"
+)
+@click.option("--target", help="ARN of target SQS queue or Lambda function where reprocessed messages go.")
 @click_log.simple_verbosity_option(logger)
 def sqs(
     dlq_name: str,
@@ -65,12 +70,15 @@ def sqs(
     queue_name: Optional[str] = None,
     interactive: bool = False,
     reprocess_all_unhandled: bool = False,
+    reprocess_all: bool = False,
+    async_invoke: bool = False,
+    target: Optional[str] = None,
 ):
     """
     Process messages from DLQ.
     """
     recurring_actions: Dict[EventCategory, Action] = {}
-    target_arn: Optional[str] = None
+    target_arn: Optional[str] = target
 
     if interactive and reprocess_all_unhandled:
         raise click.BadParameter("Can't use both --interactive and --reprocess-all-unhandled flags at once.")
@@ -87,6 +95,8 @@ def sqs(
     inspectors = []
     if reprocess_all_unhandled:
         inspectors.append(Inspectors.reprocess_all_unhandled_errors)
+    if reprocess_all:
+        inspectors.append(Inspectors.reprocess_all)
 
     for message in read_messages(client=sqs_client, queue_url=dlq_url, long_poll_duration=long_poll):
         message_body = json.loads(message["Body"])
@@ -137,6 +147,7 @@ def sqs(
                     function_arn=task.target,
                     payload=task.payload,
                     dry_run=dry_run,
+                    async_invoke=async_invoke,
                 )
             elif task.target.startswith("arn:aws:sqs:") or queue_url:
                 success = requeue(
